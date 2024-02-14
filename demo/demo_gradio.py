@@ -1,3 +1,9 @@
+import zipfile
+from datetime import time
+from io import BytesIO
+from multiprocessing.dummy import Pool
+
+import PIL
 import gradio as gr
 import os
 from os import path
@@ -7,6 +13,7 @@ from argparse import ArgumentParser
 import numpy as np
 import torch
 import cv2
+from PIL import Image
 from tqdm import tqdm
 
 from deva.inference.eval_args import add_common_eval_args, get_model_and_config
@@ -20,7 +27,46 @@ from deva.ext.automatic_processor import process_frame_automatic as process_fram
 from deva.ext.with_text_processor import process_frame_with_text as process_frame_text
 
 
-def demo_with_text(video: gr.Video, text: str, threshold: float, max_num_objects: int,
+def round2(num):
+    num = round(num)
+    if num % 2 != 0:
+        num += 1
+    return num
+
+
+def get_frames_from_zip(file_input, resize_ratio_factor=1.0):
+    """
+    Args:
+        video_path:str
+        timestamp:float64
+    Return
+        [[0:nearest_frame], [nearest_frame:], nearest_frame]
+    """
+    print(file_input)
+    with zipfile.ZipFile(file_input.name) as zip_ref:
+        img_file_names = [_.filename for _ in zip_ref.infolist() if not _.is_dir()]
+        img_file_names = sorted(img_file_names)
+
+        frames = [None] * len(img_file_names)
+        exifs = [None] * len(img_file_names)
+
+        def extract_frame(img_file_name_i):
+            img_file_name, i = img_file_name_i
+            with zip_ref.open(img_file_name) as file:
+                image = Image.open(BytesIO(file.read()))
+                image = PIL.ImageOps.exif_transpose(image)
+                max_length = max(image.size)
+                resize_ratio = resize_ratio_factor * 1600. / max_length
+                image = image.resize((round2(image.size[0] * resize_ratio), round2(image.size[1] * resize_ratio)), Image.LANCZOS)
+                frames[i] = np.array(image)
+                exifs[i] = image.info.get('exif', None)
+        with Pool() as pool:
+            list(tqdm(pool.imap_unordered(extract_frame, zip(img_file_names, range(len(img_file_names)))), total=len(img_file_names)))
+
+    return frames, exifs
+
+
+def demo_with_text(file: gr.File, text: str, threshold: float, max_num_objects: int,
                    internal_resolution: int, detection_every: int, max_missed_detection: int,
                    chunk_size: int, sam_variant: str, temporal_setting: str):
     np.random.seed(42)
@@ -41,7 +87,7 @@ def demo_with_text(video: gr.Video, text: str, threshold: float, max_num_objects
     cfg['max_missed_detection_count'] = max_missed_detection
     cfg['sam_variant'] = sam_variant
     cfg['temporal_setting'] = temporal_setting
-    gd_model, sam_model = get_grounding_dino_model(cfg, 'cuda')
+    gd_model, sam_model = get_grounding_dino_model(cfg, 'cpu')
 
     deva = DEVAInferenceCore(deva_model, config=cfg)
     deva.next_voting_frame = cfg['num_voting_frames'] - 1
@@ -51,44 +97,44 @@ def demo_with_text(video: gr.Video, text: str, threshold: float, max_num_objects
 
     # obtain temporary directory
     result_saver = ResultSaver(None, None, dataset='gradio', object_manager=deva.object_manager)
-    writer_initizied = False
+    frames, exifs = get_frames_from_zip(file_input=file, resize_ratio_factor=0.5)
+    frames = frames
 
-    cap = cv2.VideoCapture(video)
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    ti = 0
+    h, w = frames[0].shape[:2]
+    output_folder = path.join(tempfile.gettempdir(), 'gradio-deva')
+    print(f'{output_folder=}')
+    os.makedirs(output_folder, exist_ok=True)
+    vid_path = path.join(output_folder, f'{hash(os.times())}.mp4')
+    print(f'{vid_path=}')
+
+    # process_frame_text(deva,
+    #                    gd_model,
+    #                    sam_model,
+    #                    'null.png',
+    #                    result_saver,
+    #                    0,
+    #                    image_np=frames[0])
+    # flush_buffer(deva, result_saver)
+
+    writer = cv2.VideoWriter(vid_path, cv2.VideoWriter_fourcc(*'mp4v'), 5, (w, h))
+    result_saver.writer = writer
+
     # only an estimate
-    with torch.cuda.amp.autocast(enabled=cfg['amp']):
-        with tqdm(total=int(cap.get(cv2.CAP_PROP_FRAME_COUNT))) as pbar:
-            while (cap.isOpened()):
-                ret, frame = cap.read()
-                if ret == True:
-                    if not writer_initizied:
-                        h, w = frame.shape[:2]
-                        vid_folder = path.join(tempfile.gettempdir(), 'gradio-deva')
-                        os.makedirs(vid_folder, exist_ok=True)
-                        vid_path = path.join(vid_folder, f'{hash(os.times())}.mp4')
-                        writer = cv2.VideoWriter(vid_path, cv2.VideoWriter_fourcc(*'mp4v'), fps,
-                                                 (w, h))
-                        writer_initizied = True
-                        result_saver.writer = writer
-
-                    process_frame_text(deva,
-                                       gd_model,
-                                       sam_model,
-                                       'null.png',
-                                       result_saver,
-                                       ti,
-                                       image_np=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                    ti += 1
-                    pbar.update(1)
-                else:
-                    break
-        flush_buffer(deva, result_saver)
+    for ti, (frame, exif) in tqdm(enumerate(zip(frames, exifs)), total=len(frames)):
+        process_frame_text(deva,
+                           gd_model,
+                           sam_model,
+                           f'{ti}.png',
+                           result_saver,
+                           ti,
+                           image_np=frame)
+    flush_buffer(deva, result_saver)
     result_saver.end()
     writer.release()
-    cap.release()
     deva.clear_buffer()
-    return vid_path
+
+    return (gr.FileExplorer(root=output_folder),
+            vid_path)
 
 
 def demo_automatic(video: gr.Video, threshold: float, points_per_side: int, max_num_objects: int,
@@ -167,13 +213,13 @@ def demo_automatic(video: gr.Video, threshold: float, points_per_side: int, max_
 text_demo_tab = gr.Interface(
     fn=demo_with_text,
     inputs=[
-        gr.Video(),
+        gr.File(),
         gr.Text(label='Prompt (class names delimited by full stops)'),
         gr.Slider(minimum=0.01, maximum=0.99, value=0.35, label='Threshold'),
         gr.Slider(
-            minimum=10,
-            maximum=1000,
-            value=200,
+            minimum=1,
+            maximum=100,
+            value=10,
             label='Max num. objects',
             step=1,
         ),
@@ -208,57 +254,8 @@ text_demo_tab = gr.Interface(
                     label='Temporal setting (semionline is slower but less noisy)',
                     value='semionline'),
     ],
-    outputs="playable_video",
-    examples=[
-        [
-            'https://user-images.githubusercontent.com/7107196/265518886-e5f6df87-9fd0-4178-8490-00c4b8dc613b.mp4',
-            'people.hats.horses',
-            0.35,
-            200,
-            480,
-            5,
-            5,
-            8,
-            'original',
-            'semionline',
-        ],
-        [
-            'https://user-images.githubusercontent.com/7107196/265518760-72e7495c-d5f9-4a8b-b7e8-8714b269e98d.mp4',
-            'people.trees',
-            0.35,
-            200,
-            480,
-            5,
-            5,
-            8,
-            'original',
-            'semionline',
-        ],
-        [
-            'https://user-images.githubusercontent.com/7107196/265518746-4a00cd0d-f712-447f-82c4-6152addffd6b.mp4',
-            'pigs',
-            0.35,
-            200,
-            480,
-            5,
-            10,
-            8,
-            'original',
-            'semionline',
-        ],
-        [
-            'https://user-images.githubusercontent.com/7107196/265596169-c556d398-44dd-423b-9ff3-49763eaecd94.mp4',
-            'capybaras',
-            0.35,
-            200,
-            480,
-            5,
-            5,
-            8,
-            'original',
-            'semionline',
-        ],
-    ],
+    outputs=["file_explorer", "playable_video"],
+    examples=[],
     cache_examples=False,
     title='DEVA: Tracking Anything with Decoupled Video Segmentation (text-prompted)')
 
@@ -306,51 +303,9 @@ auto_demo_tab = gr.Interface(
     ],
     outputs="playable_video",
     examples=[
-        [
-            'https://user-images.githubusercontent.com/7107196/265518760-72e7495c-d5f9-4a8b-b7e8-8714b269e98d.mp4',
-            0.88,
-            64,
-            200,
-            480,
-            5,
-            5,
-            64,
-            8,
-            'original',
-            'semionline',
-            True,
-        ],
-        [
-            'https://user-images.githubusercontent.com/7107196/265518886-e5f6df87-9fd0-4178-8490-00c4b8dc613b.mp4',
-            0.88,
-            64,
-            200,
-            480,
-            5,
-            5,
-            64,
-            8,
-            'original',
-            'semionline',
-            False,
-        ],
-        [
-            'https://user-images.githubusercontent.com/7107196/265518805-337dd073-07eb-4392-9610-c5f6c6b94832.mp4',
-            0.88,
-            64,
-            200,
-            480,
-            5,
-            5,
-            64,
-            8,
-            'original',
-            'semionline',
-            True,
-        ]
     ],
     cache_examples=False,
     title='DEVA: Tracking Anything with Decoupled Video Segmentation (automatic)')
 
 if __name__ == "__main__":
-    gr.TabbedInterface([text_demo_tab, auto_demo_tab], ["Text prompt", "Automatic"]).launch()
+    gr.TabbedInterface([text_demo_tab], ["Text prompt"]).launch()
