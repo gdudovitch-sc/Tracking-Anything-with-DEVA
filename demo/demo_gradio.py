@@ -1,3 +1,4 @@
+import shutil
 import zipfile
 from datetime import time
 from io import BytesIO
@@ -96,7 +97,6 @@ def demo_with_text(file: gr.File, text: str, threshold: float, max_num_objects: 
     print('Configuration:', cfg)
 
     # obtain temporary directory
-    result_saver = ResultSaver(None, None, dataset='gradio', object_manager=deva.object_manager)
     frames, exifs = get_frames_from_zip(file_input=file, resize_ratio_factor=0.5)
     frames = frames
 
@@ -104,8 +104,12 @@ def demo_with_text(file: gr.File, text: str, threshold: float, max_num_objects: 
     output_folder = path.join(tempfile.gettempdir(), 'gradio-deva')
     print(f'{output_folder=}')
     os.makedirs(output_folder, exist_ok=True)
-    vid_path = path.join(output_folder, f'{hash(os.times())}.mp4')
+    vid_name = f'{hash(os.times())}'
+    vid_path = path.join(output_folder, f'{vid_name}.mp4')
     print(f'{vid_path=}')
+
+    output_folder_images = path.join(output_folder, vid_name)
+    result_saver = ResultSaver(output_folder_images, None, dataset='gradio', object_manager=deva.object_manager)
 
     # process_frame_text(deva,
     #                    gd_model,
@@ -133,7 +137,10 @@ def demo_with_text(file: gr.File, text: str, threshold: float, max_num_objects: 
     writer.release()
     deva.clear_buffer()
 
-    return (gr.FileExplorer(root=output_folder),
+    zip_out_path = vid_path.replace('.mp4', '')
+    shutil.make_archive(zip_out_path, 'zip', output_folder_images)
+
+    return (gr.File(zip_out_path + '.zip'),
             vid_path)
 
 
@@ -169,8 +176,11 @@ def demo_automatic(video: gr.Video, threshold: float, points_per_side: int, max_
 
     print('Configuration:', cfg)
 
+    vid_folder = path.join(tempfile.gettempdir(), 'gradio-deva')
+    os.makedirs(vid_folder, exist_ok=True)
+    vid_path = path.join(vid_folder, f'{hash(os.times())}.mp4')
     # obtain temporary directory
-    result_saver = ResultSaver(None, None, dataset='gradio', object_manager=deva.object_manager)
+    result_saver = ResultSaver(path.join(vid_folder, 'output'), None, dataset='gradio', object_manager=deva.object_manager)
     writer_initizied = False
 
     cap = cv2.VideoCapture(video)
@@ -184,11 +194,7 @@ def demo_automatic(video: gr.Video, threshold: float, points_per_side: int, max_
                 if ret == True:
                     if not writer_initizied:
                         h, w = frame.shape[:2]
-                        vid_folder = path.join(tempfile.gettempdir(), 'gradio-deva')
-                        os.makedirs(vid_folder, exist_ok=True)
-                        vid_path = path.join(vid_folder, f'{hash(os.times())}.mp4')
-                        writer = cv2.VideoWriter(vid_path, cv2.VideoWriter_fourcc(*'mp4v'), fps,
-                                                 (w, h))
+                        writer = cv2.VideoWriter(vid_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
                         writer_initizied = True
                         result_saver.writer = writer
 
@@ -254,7 +260,7 @@ text_demo_tab = gr.Interface(
                     label='Temporal setting (semionline is slower but less noisy)',
                     value='semionline'),
     ],
-    outputs=["file_explorer", "playable_video"],
+    outputs=["file", "playable_video"],
     examples=[],
     cache_examples=False,
     title='DEVA: Tracking Anything with Decoupled Video Segmentation (text-prompted)')
@@ -302,8 +308,7 @@ auto_demo_tab = gr.Interface(
         gr.Checkbox(label='Suppress small masks', value=False),
     ],
     outputs="playable_video",
-    examples=[
-    ],
+    examples=[],
     cache_examples=False,
     title='DEVA: Tracking Anything with Decoupled Video Segmentation (automatic)')
 

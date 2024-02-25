@@ -96,8 +96,7 @@ class ResultSaver:
                   path_to_image: str = None):
 
         if need_resize:
-            prob = F.interpolate(prob.unsqueeze(1), shape, mode='bilinear', align_corners=False)[:,
-                                                                                                 0]
+            prob = F.interpolate(prob.unsqueeze(1), shape, mode='bilinear', align_corners=False)[:, 0]
         # Probability mask -> index mask
         mask = torch.argmax(prob, dim=0)
 
@@ -219,17 +218,23 @@ def save_result(queue: Queue):
                 if saver.palette is not None:
                     out_img.putpalette(saver.palette)
 
+            # find a place to save the mask
+            if saver.output_postfix is not None:
+                this_out_path = path.join(saver.output_root, saver.output_postfix)
+            else:
+                this_out_path = saver.output_root
+            if saver.video_name is not None:
+                this_out_path = path.join(this_out_path, saver.video_name)
+            os.makedirs(this_out_path, exist_ok=True)
+            os.makedirs(path.join(this_out_path, 'masks'), exist_ok=True)
             if saver.dataset != 'gradio':
-                # find a place to save the mask
-                if saver.output_postfix is not None:
-                    this_out_path = path.join(saver.output_root, saver.output_postfix)
-                else:
-                    this_out_path = saver.output_root
-                if saver.video_name is not None:
-                    this_out_path = path.join(this_out_path, saver.video_name)
-
-                os.makedirs(this_out_path, exist_ok=True)
                 out_img.save(path.join(this_out_path, frame_name[:-4] + '.png'))
+            else:
+                Image.fromarray((out_mask != 0).astype(np.uint8) * 255).save(path.join(path.join(this_out_path, 'masks'), frame_name[:-4] + '.png'))
+                height, width = image_np.shape[:2]
+                resize_factor = 1600 / max(height, width)
+                new_size = (int(width * resize_factor), int(height * resize_factor))
+                Image.fromarray(image_np).resize(size=new_size).save(path.join(this_out_path, frame_name[:-4] + '.png'))
 
             if saver.visualize and saver.object_manager.use_long_id:
                 if image_np is None:
