@@ -230,14 +230,14 @@ def save_result(queue: Queue):
             if saver.dataset != 'gradio':
                 out_img.save(path.join(this_out_path, frame_name[:-4] + '.png'))
             else:
-                image_np_full = Image.open(path_to_image)
-                height, width = np.array(image_np_full).shape[:2]
+                print(f'{image_np.shape=}')
+                height, width = image_np.shape[:2]
                 #resize_factor = 1600 / max(height, width)
                 #new_size = (int(width * resize_factor), int(height * resize_factor))
                 (Image.fromarray((out_mask != 0).astype(np.uint8) * 255)
                  .resize(size=(width, height), resample=Image.Resampling.BILINEAR)
                  .save(path.join(path.join(this_out_path, 'masks'), frame_name[:-4] + '.png')))
-                image_np_full.save(path.join(this_out_path, frame_name[:-4] + '.jpg'))
+                Image.fromarray(image_np).save(path.join(this_out_path, frame_name[:-4] + '.jpg'))
 
             if saver.visualize and saver.object_manager.use_long_id:
                 if image_np is None:

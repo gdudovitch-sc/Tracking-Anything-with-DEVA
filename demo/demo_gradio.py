@@ -56,9 +56,9 @@ def get_frames_from_zip(file_input, resize_ratio_factor=1.0):
             with zip_ref.open(img_file_name) as file:
                 image = Image.open(BytesIO(file.read()))
                 image = PIL.ImageOps.exif_transpose(image)
-                max_length = max(image.size)
-                resize_ratio = resize_ratio_factor * 1600. / max_length
-                image = image.resize((round2(image.size[0] * resize_ratio), round2(image.size[1] * resize_ratio)), Image.LANCZOS)
+                #max_length = max(image.size)
+                #resize_ratio = resize_ratio_factor * 1600. / max_length
+                #image = image.resize((round2(image.size[0] * resize_ratio), round2(image.size[1] * resize_ratio)), Image.LANCZOS)
                 frames[i] = np.array(image)
                 exifs[i] = image.info.get('exif', None)
         with Pool() as pool:
