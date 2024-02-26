@@ -233,8 +233,8 @@ def save_result(queue: Queue):
                 height, width = image_np.shape[:2]
                 resize_factor = 1600 / max(height, width)
                 new_size = (int(width * resize_factor), int(height * resize_factor))
-                Image.fromarray((out_mask != 0).astype(np.uint8) * 255).resize(size=new_size).save(path.join(path.join(this_out_path, 'masks'), frame_name[:-4] + '.png'))
-                Image.fromarray(image_np).resize(size=new_size).save(path.join(this_out_path, frame_name[:-4] + '.png'))
+                Image.fromarray((out_mask != 0).astype(np.uint8) * 255).resize(size=new_size, resample=Image.Resampling.LANCZOS).save(path.join(path.join(this_out_path, 'masks'), frame_name[:-4] + '.png'))
+                Image.fromarray(image_np).resize(size=new_size, resample=Image.Resampling.BILINEAR).save(path.join(this_out_path, frame_name[:-4] + '.png'))
 
             if saver.visualize and saver.object_manager.use_long_id:
                 if image_np is None:
