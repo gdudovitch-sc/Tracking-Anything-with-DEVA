@@ -237,7 +237,7 @@ text_demo_tab = gr.Interface(
             step=1,
         ),
         gr.Slider(
-            minimum=3,
+            minimum=1,
             maximum=100,
             value=5,
             label='Incorpate detection every [X] frames',
