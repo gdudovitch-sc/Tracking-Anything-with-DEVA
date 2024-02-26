@@ -88,7 +88,7 @@ def demo_with_text(file: gr.File, text: str, threshold: float, max_num_objects: 
     cfg['max_missed_detection_count'] = max_missed_detection
     cfg['sam_variant'] = sam_variant
     cfg['temporal_setting'] = temporal_setting
-    gd_model, sam_model = get_grounding_dino_model(cfg, 'cpu')
+    gd_model, sam_model = get_grounding_dino_model(cfg, 'cuda')
 
     deva = DEVAInferenceCore(deva_model, config=cfg)
     deva.next_voting_frame = cfg['num_voting_frames'] - 1
