@@ -120,7 +120,7 @@ def demo_with_text(file: gr.File, text: str, threshold: float, max_num_objects: 
     #                    image_np=frames[0])
     # flush_buffer(deva, result_saver)
 
-    writer = cv2.VideoWriter(vid_path, cv2.VideoWriter_fourcc(*'mp4v'), 5, (w, h))
+    writer = cv2.VideoWriter(vid_path, cv2.VideoWriter_fourcc(*'h264'), 5, (w, h))
     result_saver.writer = writer
 
     # only an estimate
